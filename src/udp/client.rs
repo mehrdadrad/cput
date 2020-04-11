@@ -22,7 +22,7 @@ impl<'a> Client<'a> {
         let mut threads = Vec::new();
         let lock = Arc::new(Mutex::new(0_u64));
 
-        for i in 0..self.thread_num {
+        for _ in 0..self.thread_num {
             let socket = socket.try_clone().expect("couldn't clone the socket");
             let payload = &[0u8; 1500];
             let wait = self.wait();
@@ -36,7 +36,6 @@ impl<'a> Client<'a> {
                 }
                 socket.send(payload).expect("failed write to server");
                 *guard += 1;
-                println!("sent! {} {}", i, guard);
                 drop(guard);
                 sleep(wait);
             }));
@@ -57,7 +56,7 @@ pub fn new<'a>() -> Client<'a> {
         src_addr: "0.0.0.0:3056",
         dst_addr: "127.0.0.1:3055",
         thread_num: 4,
-        rate: 200,
-        count: 100,
+        rate: 1000,
+        count: 1000,
     }
 }

@@ -32,24 +32,55 @@ fn main() {
                 .help("threads number")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("bind")
+                .short("b")
+                .long("bind")
+                .help("bind address and port")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("host")
+                .short("h")
+                .long("host")
+                .help("host address and port")
+                .takes_value(true),
+        )
         .get_matches();
 
     if matches.is_present("server") == true {
-        let s = udp::server::new();
+        let mut s = udp::server::new();
+
+        if let Some(x) = matches.value_of("bind") {
+            s.addr = x;
+        }
+
+        if let Some(x) = matches.value_of("thread") {
+            s.thread_num = x.parse::<u8>().unwrap();
+        }
+
         s.run();
     } else {
         let mut c = udp::client::new();
-        match matches.value_of("count") {
-            Some(x) => c.count = x.parse::<u64>().unwrap(),
-            None => {}
+
+        if let Some(x) = matches.value_of("count") {
+            c.count = x.parse::<u64>().unwrap();
         }
-        match matches.value_of("rate") {
-            Some(x) => c.rate = x.parse::<u64>().unwrap(),
-            None => {}
+
+        if let Some(x) = matches.value_of("rate") {
+            c.rate = x.parse::<u64>().unwrap();
         }
-        match matches.value_of("thread") {
-            Some(x) => c.thread_num = x.parse::<u8>().unwrap(),
-            None => {}
+
+        if let Some(x) = matches.value_of("thread") {
+            c.thread_num = x.parse::<u8>().unwrap();
+        }
+
+        if let Some(x) = matches.value_of("bind") {
+            c.src_addr = x;
+        }
+
+        if let Some(x) = matches.value_of("host") {
+            c.dst_addr = x;
         }
 
         c.run();
