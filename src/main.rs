@@ -49,7 +49,7 @@ fn main() {
         .get_matches();
 
     if matches.is_present("server") == true {
-        let mut s = udp::server::new();
+        let mut s = udp::Server::new();
 
         if let Some(x) = matches.value_of("bind") {
             s.addr = x;
@@ -61,7 +61,7 @@ fn main() {
 
         s.run();
     } else {
-        let mut c = udp::client::new();
+        let mut c = udp::Client::new();
 
         if let Some(x) = matches.value_of("count") {
             c.count = x.parse::<u64>().unwrap();
