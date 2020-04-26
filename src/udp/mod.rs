@@ -1,3 +1,5 @@
+use crate::stats::Bucket;
+use crossbeam::channel::Sender;
 use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -8,89 +10,103 @@ pub struct Client<'a> {
     pub src_addr: &'a str,
     pub dst_addr: &'a str,
     pub thread_num: u8,
-    pub rate: u64,
-    pub count: u64,
-    pub mtu: u16,
+    pub count: u128,
+    pub rate_limit: u64,
+    pub stats_tx: Sender<Bucket>,
 }
 
 impl<'a> Client<'a> {
-    pub fn new() -> Client<'a> {
+    pub fn new(stats_tx: Sender<Bucket>) -> Self {
         Client {
             src_addr: "0.0.0.0:3056",
             dst_addr: "127.0.0.1:3055",
             thread_num: 4,
-            rate: 1000,
-            count: 1000,
-            mtu: 1500,
+            count: 10000,
+            rate_limit: 1000,
+            stats_tx: stats_tx,
         }
     }
-    pub fn run(&self) {
+
+    pub fn start(&self) -> Result<(), std::io::Error> {
         let socket = UdpSocket::bind(self.src_addr).expect("couldn't bind the socket");
         socket
             .connect(self.dst_addr)
             .expect("couldn't connect to peer");
-
         let mut threads = Vec::new();
-        let lock = Arc::new(Mutex::new(0_u64));
+        let lock = Arc::new(Mutex::new(0_u128));
 
         for _ in 0..self.thread_num {
-            let socket = socket.try_clone().expect("couldn't clone the socket");
+            let socket_cloned = socket.try_clone().expect("couldn't clone the socket");
             let payload = &[0u8; 1500];
-            let wait = self.wait();
-            let count = self.count;
+
+            let stats_tx_cloned = self.stats_tx.clone();
             let lock2 = lock.clone();
+            let count = self.count;
+            let rate_limit = self.rate_limit;
+            let thread_num = self.thread_num;
 
             threads.push(thread::spawn(move || loop {
                 let mut guard = lock2.lock().unwrap();
                 if *guard >= count {
                     break;
                 }
-                socket.send(payload).expect("failed write to server");
+                socket_cloned.send(payload).expect("failed write to server");
+                stats_tx_cloned
+                    .send(Bucket { tx: 1, rx: 0 })
+                    .expect("failed write to stats");
                 *guard += 1;
                 drop(guard);
 
-                sleep(wait);
+                Self::rate_limit(rate_limit, thread_num);
             }));
         }
 
         for t in threads {
             t.join().unwrap();
         }
+
+        // completed signal
+        self.stats_tx.send(Bucket { tx: 0, rx: 0 }).unwrap();
+
+        Ok(())
     }
 
-    fn wait(&self) -> Duration {
-        Duration::from_micros(1000000 / (self.rate / self.thread_num as u64))
+    fn rate_limit(rate_limit: u64, thread_num: u8) {
+        sleep(Duration::from_micros(
+            1000000 / (rate_limit / thread_num as u64),
+        ));
     }
 }
 
 pub struct Server<'a> {
     pub addr: &'a str,
     pub thread_num: u8,
+    pub stats_tx: Sender<Bucket>,
 }
 
 impl<'a> Server<'a> {
-    pub fn new() -> Server<'a> {
+    pub fn new(stats_tx: Sender<Bucket>) -> Self {
         Server {
             addr: "0.0.0.0:3055",
             thread_num: 4,
+            stats_tx: stats_tx,
         }
     }
-    pub fn run(&self) {
-        let socket = UdpSocket::bind(self.addr).expect("couldn't bind the socket");
 
+    pub fn start(&self) -> Result<(), std::io::Error> {
+        let socket = UdpSocket::bind(self.addr)?;
         let mut threads = Vec::new();
-        let lock = Arc::new(Mutex::new(0_u64));
 
         for _ in 0..self.thread_num {
-            let socket = socket.try_clone().expect("couldn't clone the socket");
+            let socket_cloned = socket.try_clone().expect("couldn't clone the socket");
             let mut buf = [0; 1500];
-            let lock2 = lock.clone();
-
+            let stats_tx_cloned = self.stats_tx.clone();
             threads.push(thread::spawn(move || loop {
-                match socket.recv_from(&mut buf) {
+                match socket_cloned.recv_from(&mut buf) {
                     Ok((_, _)) => {
-                        let mut guard = lock2.lock().unwrap();
-                        *guard += 1;
+                        stats_tx_cloned
+                            .send(Bucket { tx: 0, rx: 1 })
+                            .expect("couldn't write to channel");
                     }
                     Err(e) => {
                         eprintln!("error: {}", e);
@@ -99,23 +115,10 @@ impl<'a> Server<'a> {
             }));
         }
 
-        let lock2 = lock.clone();
-        let mut counter = 0;
-        thread::spawn(move || loop {
-            sleep(Duration::from_secs(5));
-            let guard = lock2.lock().unwrap();
-            if *guard > 0 && *guard > counter {
-                println!(
-                    "packets rcvd: {} rate: {} pps",
-                    *guard,
-                    (*guard - counter) / 5
-                );
-            }
-            counter = *guard;
-        });
-
         for t in threads {
             t.join().unwrap();
         }
+
+        Ok(())
     }
 }
