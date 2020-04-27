@@ -6,20 +6,20 @@ use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 
-pub struct Client<'a> {
-    pub src_addr: &'a str,
-    pub dst_addr: &'a str,
+pub struct Client {
+    pub src_addr: String,
+    pub dst_addr: String,
     pub thread_num: u8,
     pub count: u128,
     pub rate_limit: u64,
     pub stats_tx: Sender<Bucket>,
 }
 
-impl<'a> Client<'a> {
+impl Client {
     pub fn new(stats_tx: Sender<Bucket>) -> Self {
         Client {
-            src_addr: "0.0.0.0:3056",
-            dst_addr: "127.0.0.1:3055",
+            src_addr: "0.0.0.0:3056".to_string(),
+            dst_addr: "127.0.0.1:3055".to_string(),
             thread_num: 4,
             count: 10000,
             rate_limit: 1000,
@@ -28,9 +28,9 @@ impl<'a> Client<'a> {
     }
 
     pub fn start(&self) -> Result<(), std::io::Error> {
-        let socket = UdpSocket::bind(self.src_addr).expect("couldn't bind the socket");
+        let socket = UdpSocket::bind(&self.src_addr).expect("couldn't bind the socket");
         socket
-            .connect(self.dst_addr)
+            .connect(&self.dst_addr)
             .expect("couldn't connect to peer");
         let mut threads = Vec::new();
         let lock = Arc::new(Mutex::new(0_u128));
@@ -78,23 +78,23 @@ impl<'a> Client<'a> {
     }
 }
 
-pub struct Server<'a> {
-    pub addr: &'a str,
+pub struct Server {
+    pub addr: String,
     pub thread_num: u8,
     pub stats_tx: Sender<Bucket>,
 }
 
-impl<'a> Server<'a> {
+impl Server {
     pub fn new(stats_tx: Sender<Bucket>) -> Self {
         Server {
-            addr: "0.0.0.0:3055",
+            addr: "0.0.0.0:3055".to_string(),
             thread_num: 4,
             stats_tx: stats_tx,
         }
     }
 
     pub fn start(&self) -> Result<(), std::io::Error> {
-        let socket = UdpSocket::bind(self.addr)?;
+        let socket = UdpSocket::bind(&self.addr)?;
         let mut threads = Vec::new();
 
         for _ in 0..self.thread_num {

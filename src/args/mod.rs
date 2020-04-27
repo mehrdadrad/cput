@@ -15,24 +15,34 @@ impl Cmd {
         server: &mut udp::Server,
         stats: &mut stats::Stats,
     ) -> Result<usize, ParseIntError> {
-        let matches = App::new("circuit throughput")
+        let matches = App::new("Circuit Throughput")
             .version("0.0.1")
+            .about(
+                r#"
+            host1# cput -s 
+            host2# cput -c --server-addr host1:3055
+            "#,
+            )
             .arg(
                 Arg::with_name("server")
                     .short("s")
                     .long("server")
+                    .conflicts_with("client")
                     .help("enable server mode"),
             )
             .arg(
                 Arg::with_name("client")
                     .short("c")
                     .long("client")
+                    .conflicts_with("server")
                     .help("enable client mode"),
             )
             .arg(
                 Arg::with_name("loopback")
                     .short("l")
                     .long("loopback")
+                    .conflicts_with("server")
+                    .conflicts_with("client")
                     .help("enable loopback mode"),
             )
             .arg(Arg::with_name("json").long("json").help("set json output"))
@@ -62,6 +72,24 @@ impl Cmd {
                     .help("set rate limit")
                     .takes_value(true),
             )
+            .arg(
+                Arg::with_name("source-addr")
+                    .long("source-addr")
+                    .help("client source ip::port address")
+                    .takes_value(true),
+            )
+            .arg(
+                Arg::with_name("server-addr")
+                    .long("server-addr")
+                    .help("server / host ip::port address")
+                    .takes_value(true),
+            )
+            .arg(
+                Arg::with_name("server-bind")
+                    .long("server-bind")
+                    .help("server bind ip::port address")
+                    .takes_value(true),
+            )
             .get_matches();
 
         if let Some(x) = matches.value_of("thread") {
@@ -71,6 +99,18 @@ impl Cmd {
 
         if let Some(x) = matches.value_of("count") {
             client.count = x.parse::<u128>()?;
+        }
+
+        if let Some(x) = matches.value_of("source-addr") {
+            client.src_addr = x.to_string();
+        }
+
+        if let Some(x) = matches.value_of("server-addr") {
+            client.dst_addr = x.to_string();
+        }
+
+        if let Some(x) = matches.value_of("server-bind") {
+            server.addr = x.to_string();
         }
 
         if let Some(x) = matches.value_of("rate") {
