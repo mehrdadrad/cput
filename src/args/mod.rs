@@ -1,5 +1,6 @@
 use crate::{stats, udp};
 use clap::{App, Arg};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::ParseIntError;
 
 pub struct Cmd {}
@@ -126,12 +127,18 @@ impl Cmd {
         }
 
         if matches.is_present("server") == true {
-            stats.tcp_server_addr = String::from("0.0.0.0:8080");
+            stats.tcp_server_bind = String::from("0.0.0.0:8080");
             return Ok(0);
         }
 
         if matches.is_present("client") == true {
-            stats.tcp_client_addr = String::from("127.0.0.1:8080");
+            let mut addr_iter = client.dst_addr.to_socket_addrs().unwrap();
+            if let Some(a) = addr_iter.next() {
+                let tcp_a = SocketAddr::new(a.ip(), 8080);
+                stats.tcp_server_addr = tcp_a.to_string();
+            } else {
+                stats.tcp_server_addr = String::from("127.0.0.1:8080");
+            }
             return Ok(1);
         }
 
