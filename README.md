@@ -1,5 +1,6 @@
 # cput
-circuit throughput 
+the cput tool works as client and server. it generates UDP traffic and measures UDP packet loss also it measures TCP round-trip time between end points. the output / statistics can be realtime or json so you can integrate with you script quickly. 
+![topo](/docs/imgs/cput_diagram.png?raw=true "cput")
 
 Client Side
 ```
