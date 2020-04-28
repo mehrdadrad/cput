@@ -1,5 +1,5 @@
 # cput
-the cput tool works as client and server. it generates UDP traffic and measures UDP packet loss also it measures TCP round-trip time between end points. the output / statistics can be realtime or json so you can integrate with you script quickly. 
+the cput tool works as client and server. it generates UDP traffic and measures UDP packet loss also it measures TCP round-trip time between two end points. the output / statistics can be realtime or json so you can integrate with your script quickly. 
 ![topo](/docs/imgs/cput_diagram.png?raw=true "cput")
 
 Client Side
@@ -26,7 +26,7 @@ cput client mode enabled
     "min": 12.775,
     "max": 20.17,
     "avg": 14.78,
-    "count": 3
+    "count": 10
   }
 }
 ```
