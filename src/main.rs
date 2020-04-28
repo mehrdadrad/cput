@@ -31,7 +31,7 @@ fn main() -> Result<(), ParseIntError> {
         }
     };
 
-    stats.start();
+    stats.start().unwrap();
 
     Ok(())
 }

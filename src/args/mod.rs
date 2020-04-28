@@ -74,6 +74,12 @@ impl Cmd {
                     .takes_value(true),
             )
             .arg(
+                Arg::with_name("mtu")
+                    .long("mtu")
+                    .help("UDP packet / payload size")
+                    .takes_value(true),
+            )
+            .arg(
                 Arg::with_name("source-addr")
                     .long("source-addr")
                     .help("client source ip::port address")
@@ -116,6 +122,10 @@ impl Cmd {
 
         if let Some(x) = matches.value_of("rate") {
             client.rate_limit = x.parse::<u64>()?;
+        }
+
+        if let Some(x) = matches.value_of("mtu") {
+            client.mtu = x.parse::<usize>()?;
         }
 
         if matches.is_present("json") {

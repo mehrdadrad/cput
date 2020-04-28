@@ -10,6 +10,7 @@ pub struct Client {
     pub src_addr: String,
     pub dst_addr: String,
     pub thread_num: u8,
+    pub mtu: usize,
     pub count: u128,
     pub rate_limit: u64,
     pub stats_tx: Sender<Bucket>,
@@ -21,6 +22,7 @@ impl Client {
             src_addr: "0.0.0.0:3056".to_string(),
             dst_addr: "127.0.0.1:3055".to_string(),
             thread_num: 4,
+            mtu: 512,
             count: 10000,
             rate_limit: 1000,
             stats_tx: stats_tx,
@@ -37,7 +39,7 @@ impl Client {
 
         for _ in 0..self.thread_num {
             let socket_cloned = socket.try_clone().expect("couldn't clone the socket");
-            let payload = &[0u8; 1500];
+            let payload = vec![0u8; self.mtu];
 
             let stats_tx_cloned = self.stats_tx.clone();
             let lock2 = lock.clone();
@@ -45,30 +47,41 @@ impl Client {
             let rate_limit = self.rate_limit;
             let thread_num = self.thread_num;
 
-            threads.push(thread::spawn(move || loop {
-                let mut guard = lock2.lock().unwrap();
-                if *guard >= count {
-                    break;
-                }
-                socket_cloned.send(payload).expect("failed write to server");
-                stats_tx_cloned
-                    .send(Bucket { tx: 1, rx: 0 })
-                    .expect("failed write to stats");
-                *guard += 1;
-                drop(guard);
+            threads.push(thread::spawn(move || -> Result<(), std::io::Error> {
+                loop {
+                    let mut guard = lock2.lock().unwrap();
+                    if *guard >= count {
+                        break;
+                    }
+                    socket_cloned.send(&payload)?;
 
-                Self::rate_limit(rate_limit, thread_num);
+                    stats_tx_cloned
+                        .send(Bucket { tx: 1, rx: 0 })
+                        .expect("failed write to stats");
+                    *guard += 1;
+                    drop(guard);
+
+                    Self::rate_limit(rate_limit, thread_num);
+                }
+
+                Ok(())
             }));
         }
 
         for t in threads {
-            t.join().unwrap();
+            if let Err(e) = t.join().unwrap() {
+                self.stats_quit_sig();
+                return Err(e);
+            }
         }
 
-        // completed signal
-        self.stats_tx.send(Bucket { tx: 0, rx: 0 }).unwrap();
+        self.stats_quit_sig();
 
         Ok(())
+    }
+
+    fn stats_quit_sig(&self) {
+        self.stats_tx.send(Bucket { tx: 0, rx: 0 }).unwrap();
     }
 
     fn rate_limit(rate_limit: u64, thread_num: u8) {

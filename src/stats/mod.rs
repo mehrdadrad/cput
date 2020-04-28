@@ -32,9 +32,18 @@ struct Timer {
 }
 
 #[derive(Serialize)]
-struct OutputJson {
-    sent_packet: u64,
-    received_packet: u64,
+struct TcpRtt {
+    min: f64,
+    max: f64,
+    avg: f64,
+    count: u64,
+}
+
+#[derive(Serialize)]
+struct OutputJson<'a> {
+    udp_packets_transmitted: u64,
+    udp_packets_received: u64,
+    tcp_round_trip_time: &'a TcpRtt,
 }
 
 pub struct Stats {
@@ -54,10 +63,11 @@ impl Stats {
         }
     }
 
-    pub fn start(&self) {
+    pub fn start(&self) -> Result<(), std::io::Error> {
         let cursor = cursor();
         let total_tx = AtomicU64::new(0);
         let total_rx = Arc::new(AtomicU64::new(0));
+        let mut tcp_rtt = TcpRtt::new();
         let mut timer = Timer::new();
         let mut peer = String::from("localhost");
         let mut peer_server = String::from("localhost");
@@ -79,20 +89,25 @@ impl Stats {
                         Ok(x) => {
                            if x.tx == 0 && x.rx == 0 {
                               if !self.tcp_server_addr.is_empty() {
-                                 let tb = Self::tcp_client(
+                                 let (tb, rtt) = match Self::tcp_client(
                                      &self.tcp_server_addr,
                                      TcpBucket{tx: total_tx.load(Ordering::Relaxed),
                                      rx:0, peer: "".to_string()}
-                                    );
+                                    ){
+                                        Ok((a,b)) => (a,b),
+                                        Err(e) => return Err(e)
+                                    };
+
+                                    tcp_rtt.update(rtt);
 
                                     total_rx.store(tb.rx, Ordering::Relaxed);
 
-                                    // completed signal
+                                    // quit signal
                                     Self::tcp_client(
                                      &self.tcp_server_addr,
                                      TcpBucket{tx: 0,
                                      rx:0, peer: "".to_string()}
-                                    );
+                                    )?;
                               }
 
                               self.output(
@@ -100,6 +115,7 @@ impl Stats {
                                 total_rx.load(Ordering::Relaxed),
                                 &peer,
                                 &peer_server,
+                                &tcp_rtt,
                                 true,
                               );
 
@@ -117,7 +133,7 @@ impl Stats {
                 recv(tcp_rx) -> msg => {
                     match msg {
                         Ok(x) => {
-                            // completed signal
+                            // quit signal
                             if x.tx == 0 {
                                 break;
                             }
@@ -131,14 +147,19 @@ impl Stats {
             }
 
             if timer.ticker() && !self.tcp_server_addr.is_empty() {
-                let tb = Self::tcp_client(
+                let (tb, rtt) = match Self::tcp_client(
                     &self.tcp_server_addr,
                     TcpBucket {
                         tx: total_tx.load(Ordering::Relaxed),
                         rx: 0,
                         peer: "".to_string(),
                     },
-                );
+                ) {
+                    Ok((a, b)) => (a, b),
+                    Err(e) => return Err(e),
+                };
+
+                tcp_rtt.update(rtt);
 
                 total_rx.store(tb.rx, Ordering::Relaxed);
                 peer_server = tb.peer;
@@ -151,9 +172,35 @@ impl Stats {
                 total_rx.load(Ordering::Relaxed),
                 &peer,
                 &peer_server,
+                &tcp_rtt,
                 false,
             );
         }
+
+        cursor.show().unwrap();
+
+        Ok(())
+    }
+
+    pub fn _is_server_reachable(&self) -> bool {
+        let mut stream = match TcpStream::connect("54.67.98.109:8080") {
+            Ok(stream) => stream,
+            Err(_) => {
+                eprintln!("server side is not reachable");
+                return false;
+            }
+        };
+
+        let b = TcpBucket {
+            rx: 0,
+            tx: 0,
+            peer: "".to_string(),
+        };
+
+        let serialized = serde_json::to_string(&b).unwrap();
+        stream.write(&serialized.as_bytes()).unwrap();
+
+        true
     }
 
     fn tcp_server(addr: String, tx: Sender<TcpBucket>, total_rx: Arc<AtomicU64>) {
@@ -171,30 +218,38 @@ impl Stats {
                         peer: "".to_string(),
                     };
 
-                    let serialized = serde_json::to_string(&b).unwrap();
-                    let mut a = [0u8; 128];
-                    padding(serialized.as_bytes(), &mut a);
-                    stream.write(&a).unwrap();
+                    match serde_json::to_string(&b) {
+                        Ok(serialized) => {
+                            let mut a = [0u8; 128];
+                            padding(serialized.as_bytes(), &mut a);
+                            stream.write(&a).unwrap();
+                        }
+                        Err(e) => println!("{}", e),
+                    };
 
                     // read
 
                     let mut buf = vec![];
                     stream.read_to_end(&mut buf).unwrap();
-                    let deserialized: TcpBucket = serde_json::from_slice(&buf).unwrap();
-                    tx.send(TcpBucket {
-                        tx: deserialized.tx,
-                        rx: 0,
-                        peer: stream.peer_addr().unwrap().to_string(),
-                    })
-                    .unwrap();
+                    match serde_json::from_slice::<TcpBucket>(&buf) {
+                        Ok(deserialized) => {
+                            tx.send(TcpBucket {
+                                tx: deserialized.tx,
+                                rx: 0,
+                                peer: stream.peer_addr().unwrap().to_string(),
+                            })
+                            .unwrap();
+                        }
+                        Err(e) => eprintln!("{}", e),
+                    };
                 }
                 Err(e) => eprintln!("tcp server error: {}", e),
             }
         }
     }
 
-    fn tcp_client(addr: &String, b: TcpBucket) -> TcpBucket {
-        let mut stream = TcpStream::connect(addr).unwrap();
+    fn tcp_client(addr: &String, b: TcpBucket) -> Result<(TcpBucket, f64), std::io::Error> {
+        let mut stream = TcpStream::connect(addr)?;
         stream.set_nodelay(true).expect("set_nodelay call failed");
 
         let now = Instant::now();
@@ -209,23 +264,32 @@ impl Stats {
         let mut buf = [0u8; 128];
         stream.read_exact(&mut buf).unwrap();
 
-        let rtt = now.elapsed().as_millis();
+        let rtt = now.elapsed().as_micros();
 
         let buf_sliced = &buf[..buf[buf.len() - 1] as usize];
         let mut deserialized: TcpBucket = serde_json::from_slice(&buf_sliced).unwrap();
 
         deserialized.peer = addr.to_string();
 
-        deserialized
+        Ok((deserialized, (rtt as f64) / 1000.0))
     }
 
-    fn output(&self, tx: u64, rx: u64, peer: &String, peer_server: &String, last_iter: bool) {
+    fn output(
+        &self,
+        tx: u64,
+        rx: u64,
+        peer: &String,
+        peer_server: &String,
+        tcp_rtt: &TcpRtt,
+        last_iter: bool,
+    ) {
         match self.output_type {
             Output::Json => {
                 if last_iter {
                     let d = OutputJson {
-                        sent_packet: tx,
-                        received_packet: rx,
+                        udp_packets_transmitted: tx,
+                        udp_packets_received: rx,
+                        tcp_round_trip_time: tcp_rtt,
                     };
 
                     let j = serde_json::to_string(&d).unwrap();
@@ -235,17 +299,18 @@ impl Stats {
             Output::JsonPretty => {
                 if last_iter {
                     let d = OutputJson {
-                        sent_packet: tx,
-                        received_packet: rx,
+                        udp_packets_transmitted: tx,
+                        udp_packets_received: rx,
+                        tcp_round_trip_time: tcp_rtt,
                     };
 
                     let j = serde_json::to_string_pretty(&d).unwrap();
                     println!("{}", j);
                 }
             }
-            _ => eprint!(
-                "\r[{} packets sent ({}), {} packets received ({})]",
-                tx, peer, rx, peer_server,
+            _ => print!(
+                "\r[{} UDP pkts sent ({}), {} UDP pkts recvd ({}), TCP RTT min/avg/max {:.3}/{:.3}/{:.3} ms]",
+                tx, peer, rx, peer_server, tcp_rtt.min, tcp_rtt.avg, tcp_rtt.max,
             ),
         }
     }
@@ -261,7 +326,36 @@ impl Timer {
         self.time_last = Instant::now();
     }
     fn ticker(&self) -> bool {
-        self.time_last.elapsed().as_secs() > 1
+        self.time_last.elapsed().as_millis() > 500
+    }
+}
+
+impl TcpRtt {
+    fn new() -> Self {
+        TcpRtt {
+            min: 0.0,
+            max: 0.0,
+            avg: 0.0,
+            count: 0,
+        }
+    }
+
+    fn update(&mut self, rtt: f64) {
+        if self.count == 0 {
+            self.min = rtt;
+            self.max = rtt;
+            self.avg = rtt;
+        } else {
+            if rtt > self.max {
+                self.max = rtt;
+            }
+            if rtt < self.min {
+                self.min = rtt;
+            }
+            self.avg = (self.avg + rtt) / 2.0;
+        }
+
+        self.count += 1;
     }
 }
 
