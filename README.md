@@ -1,10 +1,10 @@
 # cput
-cput is an open source software utility which wrote by rust language to generate UDP traffic over the circuit(s) and measures the latency. it works as client and server multi threading!
+cput is an open source software utility which wrote by rust language to generate UDP traffic over the circuit(s) and measures the latency. it works as client-server model and multithreading.
 
 ## Features:
-* Generate UDP traffic based on the specific MTU
+* Generates UDP traffic based on the specific MTU
 * Measures UDP loss
-* Measure TCP round-trip time
+* Measures TCP round-trip time
 * Realtime statistics or json output
 
 ![topo](/docs/imgs/cput_diagram.png?raw=true "cput")
