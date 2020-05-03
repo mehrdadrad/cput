@@ -1,5 +1,12 @@
 # cput
-the cput tool works as client and server. it generates UDP traffic and measures UDP packet loss also it measures TCP round-trip time between two end points. the output / statistics can be realtime or json so you can integrate with your script quickly. 
+cput is an open source software utility which wrote by rust language to generate UDP traffic over the circuit(s) and measures the latency. it works as client and server multi threading!
+
+## Features:
+* Generate UDP traffic based on the specific MTU
+* Measures UDP loss
+* Measure TCP round-trip time
+* Realtime statistics or json output
+
 ![topo](/docs/imgs/cput_diagram.png?raw=true "cput")
 
 Client Side
